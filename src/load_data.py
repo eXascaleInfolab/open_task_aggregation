@@ -155,6 +155,7 @@ class LoadData:
 
     def generate_annotation_matrix(self,dataset):
         answers=pd.read_csv(dataset);
+        true_labels=answers[['infl_acc','label']].drop_duplicates(subset=['infl_acc'])
         all_workers=answers.user_acc.unique();
         all_infl=answers.infl_acc.unique();
         aij=np.zeros((all_workers.shape[0]*all_infl.shape[0],3))
@@ -165,7 +166,7 @@ class LoadData:
             named_infl = answers[answers['user_acc'] == worker_acc]['infl_acc'].iloc[0]
             index = np.where(all_infl == named_infl)
             aij[((worker * all_infl.shape[0]) + index[0][0]), 2] = 1
-        return aij
+        return aij,all_workers,all_infl,true_labels.label
 
     #input to the model
     def run_load_data(self):
@@ -192,17 +193,18 @@ class LoadData:
             conn_coeff=(options[self.answers['freq'][worker_id]]+self.answers['conn'][worker_id])/2;
             mot_coeff=self.answers['mot'][worker_id]
             
-            all_workers_tweets=all_workers_tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True)
+            all_workers_tweets=all_workers_tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True,sort=True)
             
             #worker features
-            worker_x=worker_x.append(pd.DataFrame([[worker_acc_follower_nbr,worker_acc_followee_nbr,worker_acc_tweets_nbr,avg_length,\
-                                                    language,exp_coeff,conn_coeff,mot_coeff]],columns=['follower_nbr',\
+            worker_x=worker_x.append(pd.DataFrame([[worker_pseudo,worker_acc_follower_nbr,worker_acc_followee_nbr,worker_acc_tweets_nbr,avg_length,\
+                                                    language,exp_coeff,conn_coeff,mot_coeff]],columns=['user_name','follower_nbr',\
                                                     'followee_nbr','tweets_nbr','avg_length_tweets','language','exp_coeff','conn_coeff',\
-                                                    'mot_coeff']),ignore_index=True)
+                                                    'mot_coeff']),ignore_index=True,sort=True)
         [bag_words_worker,vocab]= self.bag_words_tweets(all_workers_tweets)
         sorted_vocab_worker=sorted(vocab.items(), key=operator.itemgetter(1),reverse=True)
         worker_x = pd.concat([worker_x, pd.DataFrame(bag_words_worker.toarray(),columns=[idx for idx, val in sorted_vocab_worker])], axis=1)
-        
+        worker_x = pd.concat([worker_x, pd.DataFrame(bag_words_worker.toarray(),columns=[idx for idx, val in sorted_vocab_worker])], axis=1)
+
         
         infl_x=pd.DataFrame(columns=['follower_nbr','followee_nbr','tweets_nbr',\
                                       'avg_length_tweets','language'])
@@ -214,17 +216,19 @@ class LoadData:
                 [infl_acc_follower_nbr,infl_acc_followee_nbr,infl_acc_tweets_nbr]=self.user_features_stats(api,influencer_pseudo,inlfuencer_id);
                 print (influencer_pseudo,infl_acc_follower_nbr,infl_acc_followee_nbr)
                 [bag_txt,avg_length,language]=self.user_features_meta(api,influencer_pseudo,infl_acc_tweets_nbr,inlfuencer_id);
-                all_infl_tweets=all_infl_tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True)
-                infl_x=infl_x.append(pd.DataFrame([[infl_acc_follower_nbr,infl_acc_followee_nbr,infl_acc_tweets_nbr,avg_length,\
-                                                    language]],columns=['follower_nbr',\
-                                                    'followee_nbr','tweets_nbr','avg_length_tweets','language']),ignore_index=True)
+                all_infl_tweets=all_infl_tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True,sort=True)
+                infl_x=infl_x.append(pd.DataFrame([[influencer_pseudo,infl_acc_follower_nbr,infl_acc_followee_nbr,infl_acc_tweets_nbr,avg_length,\
+                                                    language]],columns=['user_name','follower_nbr',\
+                                                    'followee_nbr','tweets_nbr','avg_length_tweets','language']),ignore_index=True,sort=True)
         
         [bag_words_infl,vocab]= self.bag_words_tweets(all_infl_tweets)
         sorted_vocab_infl=sorted(vocab.items(), key=operator.itemgetter(1),reverse=True)    
         infl_x = pd.concat([infl_x, pd.DataFrame(bag_words_infl.toarray(),columns=[idx for idx, val in sorted_vocab_infl])], axis=1)
         worker_x=worker_x.drop(['language'], axis=1)
-        infl_x=infl_x.drop(['language'], axis=1)
-        return infl_x,worker_x
+        print(infl_x[['follower_nbr', 'followee_nbr']])
+        infl_x = infl_x.drop_duplicates(subset=['user_name'])
+        infl_x=infl_x.drop(['language','user_name'], axis=1)
+        return worker_x,infl_x
         #print bag_txt,worker_id
         #tweets=tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True)
         #train_data[i,:]=[user_acc_follower_nbr,user_acc_followee_nbr,user_acc_tweets_nbr,avg_length]
