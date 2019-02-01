@@ -153,7 +153,7 @@ class LoadData:
         bag_words = tfidf_transformer.transform(messages_bow)
         return bag_words,bow_transformer.vocabulary_
 
-    def generate_annotation_matrix(self,dataset):
+    def generate_annotation_matrix_em(self,dataset):
         answers=pd.read_csv(dataset);
         true_labels=answers[['infl_acc','label']].drop_duplicates(subset=['infl_acc'])
         all_workers=answers.user_acc.unique();
@@ -168,6 +168,56 @@ class LoadData:
             aij[((worker * all_infl.shape[0]) + index[0][0]), 2] = 1
         return aij,all_workers,all_infl,true_labels.label
 
+    def generate_annotation_matrix_vem(self,dataset):
+        answers = pd.read_csv(dataset);
+        #true_labels=answers[['infl_acc','label']].drop_duplicates(subset=['infl_acc'])
+        all_workers = answers.user_acc.unique();
+        all_infl, worker_bonus_infl = self.named_influencers();
+        print all_infl
+        aij=np.zeros((all_workers.shape[0]*all_infl.shape[0],3))
+        aij[:, 0] = np.repeat(np.array(range(0, all_workers.shape[0])), all_infl.shape[0])
+        aij[:, 1] = np.tile(np.array(range(0, all_infl.shape[0])), all_workers.shape[0])
+        for worker in range(0, all_workers.shape[0]):
+            worker_acc = all_workers[worker]
+            named_infl1 = answers[answers['user_acc'] == worker_acc]['infl_acc_1'].str.replace('@','').iloc[0]
+            named_infl2 = answers[answers['user_acc'] == worker_acc]['infl_acc_2'].str.replace('@','').iloc[0]
+            named_infl3 = answers[answers['user_acc'] == worker_acc]['infl_acc_3'].str.replace('@','').iloc[0]
+            index1 = np.where(all_infl == named_infl1.lower())
+            aij[((worker * all_infl.shape[0]) + index1[0][0]), 2] = 1
+            index2 = np.where(all_infl == named_infl2.lower())
+            aij[((worker * all_infl.shape[0]) + index2[0][0]), 2] = 1
+            index3 = np.where(all_infl == named_infl3.lower())
+            aij[((worker * all_infl.shape[0]) + index3[0][0]), 2] = 1
+            for i in range(0, len(worker_bonus_infl[worker])):
+                named_infl = worker_bonus_infl[worker][i]
+                index = np.where(all_infl == named_infl.lower())
+                aij[((worker * all_infl.shape[0]) + index[0][0]), 2] = 1
+        return aij,all_workers,all_infl
+
+    def named_influencers(self):
+        all_bonus_infl=[]
+        wokrer_bonus_infl = np.empty([self.answers.shape[0],], dtype=object)
+        for worker in range(0,self.answers.shape[0]):
+            r1 = self.answers['bonus_inf'][worker].replace('[', '')
+            r2 = r1.replace(']', '')
+            r3 = r2.replace(', ,',',')
+            r4 = r3.replace('@', '')
+            r5 = r4.replace(' ','')
+            named_list = r5.split(",")
+            while ' ' in named_list: named_list.remove(' ')
+            while '' in named_list: named_list.remove('')
+            if not named_list:
+                wokrer_bonus_infl[worker] = []
+            else:
+                wokrer_bonus_infl[worker] = named_list
+            all_bonus_infl += named_list
+        all_named_infl_bonus = list(set(all_bonus_infl))
+        named_influencers = pd.concat((self.answers['infl_acc_1'].str.lower(), self.answers['infl_acc_2'].str.lower(),
+                                       self.answers['infl_acc_3'].str.lower(), pd.Series(all_named_infl_bonus).str.lower()),
+                                      axis=0).str.replace('@', '').drop_duplicates()
+        named_influencers = named_influencers.reset_index(drop=True)
+        return named_influencers, wokrer_bonus_infl
+
     #input to the model
     def run_load_data(self):
         api=self.authentification()
@@ -178,8 +228,8 @@ class LoadData:
                    'sometimes':50,
                    'always':80,
                 }
-        worker_x=pd.DataFrame(columns=['follower_nbr','followee_nbr','tweets_nbr',\
-                                      'avg_length_tweets','language','exp_coeff','conn_coeff','mot_coeff'])
+        worker_x=pd.DataFrame(columns=['user_name','follower_nbr','followee_nbr','tweets_nbr',\
+                                      'avg_length_tweets','language'])
             
         for worker_id in range (0,self.answers.shape[0]):
             worker_pseudo=self.answers['user_acc'][worker_id]
@@ -189,17 +239,16 @@ class LoadData:
             [bag_txt,avg_length,language]=self.user_features_meta(api,worker_pseudo,worker_acc_tweets_nbr,worker_id);
             
             #coefficients from the survey
-            exp_coeff=self.answers['exp'][worker_id]
-            conn_coeff=(options[self.answers['freq'][worker_id]]+self.answers['conn'][worker_id])/2;
-            mot_coeff=self.answers['mot'][worker_id]
+            #exp_coeff = self.answers['exp'][worker_id]
+            #conn_coeff = self.answers['conn'][worker_id];
+            #mot_coeff = self.answers['mot'][worker_id]
             
             all_workers_tweets=all_workers_tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True,sort=True)
             
             #worker features
             worker_x=worker_x.append(pd.DataFrame([[worker_pseudo,worker_acc_follower_nbr,worker_acc_followee_nbr,worker_acc_tweets_nbr,avg_length,\
-                                                    language,exp_coeff,conn_coeff,mot_coeff]],columns=['user_name','follower_nbr',\
-                                                    'followee_nbr','tweets_nbr','avg_length_tweets','language','exp_coeff','conn_coeff',\
-                                                    'mot_coeff']),ignore_index=True,sort=True)
+                                                    language]],columns=['user_name','follower_nbr',\
+                                                    'followee_nbr','tweets_nbr','avg_length_tweets','language']),ignore_index=True,sort=True)
         [bag_words_worker,vocab]= self.bag_words_tweets(all_workers_tweets)
         sorted_vocab_worker=sorted(vocab.items(), key=operator.itemgetter(1),reverse=True)
         worker_x = pd.concat([worker_x, pd.DataFrame(bag_words_worker.toarray(),columns=[idx for idx, val in sorted_vocab_worker])], axis=1)
@@ -210,24 +259,29 @@ class LoadData:
                                       'avg_length_tweets','language'])
         columns = ['text','lang']
         all_infl_tweets= pd.DataFrame(columns=columns)
-        for inlfuencer_id in range (0,self.answers.shape[0]):
-            influencer_pseudo=self.answers['infl_acc'][inlfuencer_id]
-            if (influencer_pseudo!=''):
+        named_influencers, wokrer_bonus_infl = self.named_influencers()
+
+        for inlfuencer_id in range (0,named_influencers.shape[0]):
+            influencer_pseudo=named_influencers.iloc[inlfuencer_id]
+            if (influencer_pseudo != ''):
                 [infl_acc_follower_nbr,infl_acc_followee_nbr,infl_acc_tweets_nbr]=self.user_features_stats(api,influencer_pseudo,inlfuencer_id);
                 print (influencer_pseudo,infl_acc_follower_nbr,infl_acc_followee_nbr)
                 [bag_txt,avg_length,language]=self.user_features_meta(api,influencer_pseudo,infl_acc_tweets_nbr,inlfuencer_id);
+
                 all_infl_tweets=all_infl_tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True,sort=True)
                 infl_x=infl_x.append(pd.DataFrame([[influencer_pseudo,infl_acc_follower_nbr,infl_acc_followee_nbr,infl_acc_tweets_nbr,avg_length,\
                                                     language]],columns=['user_name','follower_nbr',\
                                                     'followee_nbr','tweets_nbr','avg_length_tweets','language']),ignore_index=True,sort=True)
-        
+        print('bag of words')
         [bag_words_infl,vocab]= self.bag_words_tweets(all_infl_tweets)
-        sorted_vocab_infl=sorted(vocab.items(), key=operator.itemgetter(1),reverse=True)    
+        print('bag of words computed')
+        sorted_vocab_infl=sorted(vocab.items(), key=operator.itemgetter(1),reverse=True)
         infl_x = pd.concat([infl_x, pd.DataFrame(bag_words_infl.toarray(),columns=[idx for idx, val in sorted_vocab_infl])], axis=1)
         worker_x=worker_x.drop(['language'], axis=1)
         print(infl_x[['follower_nbr', 'followee_nbr']])
         infl_x = infl_x.drop_duplicates(subset=['user_name'])
         infl_x=infl_x.drop(['language','user_name'], axis=1)
+        worker_x = worker_x.drop(['user_name'], axis=1)
         return worker_x,infl_x
         #print bag_txt,worker_id
         #tweets=tweets.append(pd.DataFrame([[bag_txt,language]],columns=columns),ignore_index=True)
