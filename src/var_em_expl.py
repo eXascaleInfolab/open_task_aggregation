@@ -20,7 +20,6 @@ class EM_VI:
         self.worker2influencer_label = worker2influencer_label
         self.label_set = label_set
         self.true_labels = true_labels
-        self.reliability = self.init_reliability()
         self.q_z_i_0 = np.random.randint(2, size=(len(self.infl2worker_label), 1)).astype(float)
         self.q_z_i_1 = 1.0 - self.q_z_i_0
         self.A = 8.0
@@ -77,14 +76,6 @@ class EM_VI:
             print("alpha_prime_res=", alpha_prime_res, "beta_prime_res=", beta_prime_res)
             return alpha_prime_res, beta_prime_res
 
-    def init_reliability(self):
-        reliability = np.zeros((len(self.worker2influencer_label), 1))
-        for w in range(0, len(self.worker2influencer_label)):
-            total_w_correct_answers = sum(
-                np.logical_and(np.array(self.worker2influencer_label.get(w))[:, 1], true_labels.values))
-            total_w_answers = sum(np.array(self.worker2influencer_label.get(w))[:, 1])
-            reliability[w] = float(total_w_correct_answers) / float(total_w_answers)
-        return reliability
 
     def init_theta_i(self):
         # learn theta_i
@@ -185,7 +176,7 @@ class EM_VI:
         #     # variational M step
             self.m_step(classifier)
             iterr -= 1
-        return self.q_z_i_0, self.q_z_i_1, self.theta_i, self.reliability, self.alpha, self.beta
+        return self.q_z_i_0, self.q_z_i_1, self.theta_i, self.alpha, self.beta
 
 
 def get_w2il_i2wl(datafile):
@@ -222,7 +213,7 @@ if __name__ == '__main__':
     # influencer_x = sc.fit_transform(influencer_x)
     # worker_x = sc.fit_transform(worker_x)
     infl2worker_label, worker2influencer_label, label_set = get_w2il_i2wl('../output/aij.csv')
-    qz0, qz1, theta_i, rj, alpha, beta = EM_VI(worker_x, influencer_x, annotation_matrix, infl2worker_label,
+    qz0, qz1, theta_i, alpha, beta = EM_VI(worker_x, influencer_x, annotation_matrix, infl2worker_label,
                                                worker2influencer_label, label_set, true_labels).run()
     print(pd.DataFrame(data=np.concatenate([ np.where(qz0 > 0.5, 0, 1),
                                             true_labels.values.reshape(true_labels.shape[0], 1)], axis=1),columns=['classification', 'truth']))

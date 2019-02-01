@@ -34,16 +34,6 @@ class EM:
         p_phi_j = np.random.random((len(self.worker2influencer_label), 1))
         return p_z_i, 1 - p_z_i, p_phi_j
 
-    def __sigmoid(self, x):
-        return 1 / (1 + np.exp(-x))
-
-    def __sigmoid_derivative(self, x):
-        return x * (1 - x)
-
-    def neural_network(self, input_layer):
-        theta_i = self.__sigmoid(np.dot(input_layer.astype(float), self.W_I))
-        return theta_i
-
     # E-step
     def Update_e2lpd(self):
         self.e2lpd = {}
