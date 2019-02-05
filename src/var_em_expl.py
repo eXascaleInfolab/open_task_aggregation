@@ -168,7 +168,7 @@ class EM_VI:
         self.beta = beta_prime_res
 
 
-    def run(self, iterr=20):
+    def run(self, iterr=10):
         self.theta_i, classifier = self.init_theta_i()
         while iterr > 0:
             # variational E step

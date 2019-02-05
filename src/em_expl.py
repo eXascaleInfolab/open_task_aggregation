@@ -29,9 +29,10 @@ class EM:
     # initialization
     def init_probabilities(self):
         # initialize probability z_i (item's quality) randomly
-        p_z_i = np.random.randint(2, size=(len(self.infl2worker_label), 1))
+        p_z_i = np.random.randint(2, size=(len(self.infl2worker_label), 1)).astype(float)
         # initialize probability phi_j (worker's reliability) randomly
-        p_phi_j = np.random.random((len(self.worker2influencer_label), 1))
+        p_phi_j = 0.5*np.ones((len(self.worker2influencer_label), 1))
+        print "p_phi_j_init",p_phi_j
         return p_z_i, 1 - p_z_i, p_phi_j
 
     # E-step
@@ -39,16 +40,18 @@ class EM:
         self.e2lpd = {}
         all_named_influencers = self.annotation_matrix[self.annotation_matrix.iloc[:, 2] == 1]
         for infl in range(0, len(infl2worker_label)):
-            workers_naming_infl = all_named_influencers[all_named_influencers['influencer'] == infl].worker
             updated_pz_1 = 1
             updated_pz_0 = 1
-            for worker in range(0, workers_naming_infl.shape[0]):
-                updated_pz_1 = updated_pz_1 * self.theta_i[infl] * self.p_phi_j[int(workers_naming_infl.iloc[worker])]
+            infl_aij = self.annotation_matrix[self.annotation_matrix['influencer'] == infl]
+            T_i = infl_aij[infl_aij['label'] == 1].worker.values
+            for worker in T_i.astype(int):
+                updated_pz_1 = updated_pz_1 * self.theta_i[infl] * self.p_phi_j[worker]
                 updated_pz_0 = updated_pz_0 * (1 - self.theta_i[infl]) * (
-                            1 - self.p_phi_j[int(workers_naming_infl.iloc[worker])])
+                            1 - self.p_phi_j[worker])
             print("upz1", updated_pz_1, "upz0", updated_pz_0)
-            self.p_z_i_1[infl] = updated_pz_1 / (updated_pz_0 + updated_pz_1)
-            self.p_z_i_0[infl] = updated_pz_0 / (updated_pz_0 + updated_pz_1)
+            self.p_z_i_1[infl] = updated_pz_1 * 1.0 / (updated_pz_0 + updated_pz_1)
+            print updated_pz_1 * 1.0 / (updated_pz_0 + updated_pz_1)
+            self.p_z_i_0[infl] = updated_pz_0 * 1.0 / (updated_pz_0 + updated_pz_1)
         print "pz0=", self.p_z_i_0, "\npz1=", self.p_z_i_1
         return self.p_z_i_0, self.p_z_i_1, self.theta_i
 
@@ -58,9 +61,9 @@ class EM:
         # update theta_i
 
         # Fitting the data to the training dataset
-        prob_e_step = np.where(self.p_z_i_0 > 0.5, 0, 1)
+        prob_e_step = self.p_z_i_0
         y = np.concatenate((self.true_labels[0:4, None], prob_e_step[4:]))
-        classifier.fit(self.influencer_x, y, epochs=100)
+        classifier.fit(self.influencer_x, y, epochs=10, verbose=2)
         eval_model = classifier.evaluate(self.influencer_x, y)
 
         print(eval_model)
@@ -84,14 +87,14 @@ class EM:
         return self.theta_i, self.p_phi_j, classifier
 
     def run(self, iterr=20):
-        #self.p_z_i_0, self.p_z_i_1, self.p_phi_j = self.init_probabilities()
+        self.p_z_i_0, self.p_z_i_1, self.p_phi_j = self.init_probabilities()
         # initialization
-        self.p_phi_j = np.array([[0.1], [0.8], [0.4], [0.7], [0.6], [0.8], [0.8], [0.3], [0.6], [0.4], [0.7]])
-        self.p_z_i_0 = np.array([[1.0], [0.0], [1.0], [1.0], [0.0], [0.0], [0.0], [1.0]])
-        self.p_z_i_1 = 1 - self.p_z_i_0
+        #self.p_phi_j = np.array([[0.1], [0.8], [0.4], [0.7], [0.6], [0.8], [0.8], [0.3], [0.6], [0.4], [0.7]])
+        #self.p_z_i_0 = np.array([[1.0], [0.0], [1.0], [1.0], [0.0], [0.0], [0.0], [1.0]])
+        #self.p_z_i_1 = 1 - self.p_z_i_0
         classifier = Sequential()
         # First Hidden Layer
-        layer0 = Dense(2, activation='sigmoid', kernel_initializer='random_normal',
+        layer0 = Dense(3, activation='sigmoid', kernel_initializer='random_normal',
                        input_dim=self.influencer_x.shape[1])
         classifier.add(layer0)
         # Output Layer
@@ -100,7 +103,7 @@ class EM:
         # Compiling the neural network
         classifier.compile(optimizer='sgd', loss='binary_crossentropy', metrics=['accuracy'])
         y = np.concatenate((self.true_labels[0:4, None], self.p_z_i_1[4:]))
-        classifier.fit(self.influencer_x, y, epochs=100)
+        classifier.fit(self.influencer_x, y, epochs=10, verbose=2)
         self.theta_i = classifier.predict(self.influencer_x)
         print("theta", self.theta_i)
         # self.theta_i=np.array([[0.61],[0.51],[0.613],[0.581 ],[0.61 ],[0.61],[0.58 ],[0.61]])
@@ -158,7 +161,7 @@ if __name__ == '__main__':
 
     # extract the influencers features
     answers = pd.read_csv(datafile).drop_duplicates(subset=['infl_acc'])
-    influencer_x = answers[['follower_nbr', 'followee_nbr']]
+    influencer_x = answers[['follower_nbr', 'followee_nbr','avg_length_tweets','tweets_nbr']]
 
     # standardizing the input feature
     # sc = StandardScaler()
@@ -178,6 +181,6 @@ if __name__ == '__main__':
                                                         worker2influencer_label, label_set, true_labels).run()
 
     # #print the classification of named users
-    print(pd.DataFrame(data=np.concatenate([all_infl.reshape(all_infl.shape[0], 1), np.where(p_z_i_0 > 0.5, 0, 1),
+    print(pd.DataFrame(data=np.concatenate([all_infl.reshape(all_infl.shape[0], 1), np.where(p_z_i_0 > p_z_i_0.mean(), 0, 1),
                                             true_labels.values.reshape(all_infl.shape[0], 1)], axis=1),
                        columns=['influencer', 'classification', 'truth']))

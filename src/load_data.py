@@ -21,12 +21,14 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
 import iso639
 import operator
-
+import sys
+import difflib
 
 class LoadData:
     def __init__(self, dataset):
         self.dataset = dataset
         self.answers=pd.read_csv(dataset)
+        self.answers.replace({r'[^\x00-\x7F]+': ''}, regex=True, inplace=True)
         
         
     def authentification(self):
@@ -52,12 +54,18 @@ class LoadData:
         
             # Join the characters again to form the string.
             nopunc = ''.join(nopunc)
+            print lang
             language=iso639.to_name(lang)
             languages = language.split(";", 1)
             # Now just remove any stopwords
             return [word for word in nopunc.lower().split() if word.lower() not in stopwords.words(languages[0].lower())]
         except ValueError as e:
             print (e)
+        except IOError:
+            print "I/O error"
+        except:
+            print "Unexpected error:", sys.exc_info()[0]
+
     
     def remove_words(self,word_list):
         try:
@@ -173,20 +181,22 @@ class LoadData:
         #true_labels=answers[['infl_acc','label']].drop_duplicates(subset=['infl_acc'])
         all_workers = answers.user_acc.unique();
         all_infl, worker_bonus_infl = self.named_influencers();
-        print all_infl
+        all_infl = all_infl.drop_duplicates()
         aij=np.zeros((all_workers.shape[0]*all_infl.shape[0],3))
         aij[:, 0] = np.repeat(np.array(range(0, all_workers.shape[0])), all_infl.shape[0])
         aij[:, 1] = np.tile(np.array(range(0, all_infl.shape[0])), all_workers.shape[0])
         for worker in range(0, all_workers.shape[0]):
             worker_acc = all_workers[worker]
-            named_infl1 = answers[answers['user_acc'] == worker_acc]['infl_acc_1'].str.replace('@','').iloc[0]
-            named_infl2 = answers[answers['user_acc'] == worker_acc]['infl_acc_2'].str.replace('@','').iloc[0]
-            named_infl3 = answers[answers['user_acc'] == worker_acc]['infl_acc_3'].str.replace('@','').iloc[0]
-            index1 = np.where(all_infl == named_infl1.lower())
+            named_infl1 = answers[answers['user_acc'] == worker_acc]['infl_acc_1'].str.replace('@', '').iloc[0]
+            named_infl2 = answers[answers['user_acc'] == worker_acc]['infl_acc_2'].str.replace('@', '').iloc[0]
+            named_infl3 = answers[answers['user_acc'] == worker_acc]['infl_acc_3'].str.replace('@', '').iloc[0]
+            index1 = np.where(all_infl == difflib.get_close_matches(named_infl1.lower(), all_infl)[0])
             aij[((worker * all_infl.shape[0]) + index1[0][0]), 2] = 1
-            index2 = np.where(all_infl == named_infl2.lower())
+
+            index2 = np.where(all_infl == difflib.get_close_matches(named_infl2.lower(), all_infl)[0])
             aij[((worker * all_infl.shape[0]) + index2[0][0]), 2] = 1
-            index3 = np.where(all_infl == named_infl3.lower())
+
+            index3 = np.where(all_infl == difflib.get_close_matches(named_infl3.lower(), all_infl)[0])
             aij[((worker * all_infl.shape[0]) + index3[0][0]), 2] = 1
             for i in range(0, len(worker_bonus_infl[worker])):
                 named_infl = worker_bonus_infl[worker][i]
@@ -215,7 +225,7 @@ class LoadData:
         named_influencers = pd.concat((self.answers['infl_acc_1'].str.lower(), self.answers['infl_acc_2'].str.lower(),
                                        self.answers['infl_acc_3'].str.lower(), pd.Series(all_named_infl_bonus).str.lower()),
                                       axis=0).str.replace('@', '').drop_duplicates()
-        named_influencers = named_influencers.reset_index(drop=True)
+        named_influencers = named_influencers.str.replace(' ','').reset_index(drop=True)
         return named_influencers, wokrer_bonus_infl
 
     #input to the model
@@ -230,9 +240,9 @@ class LoadData:
                 }
         worker_x=pd.DataFrame(columns=['user_name','follower_nbr','followee_nbr','tweets_nbr',\
                                       'avg_length_tweets','language'])
-            
-        for worker_id in range (0,self.answers.shape[0]):
-            worker_pseudo=self.answers['user_acc'][worker_id]
+        all_workers = self.answers.user_acc.unique()
+        for worker_id in range(0,len(all_workers)):
+            worker_pseudo=all_workers[worker_id]
             
             #social media features
             [worker_acc_follower_nbr,worker_acc_followee_nbr,worker_acc_tweets_nbr]=self.user_features_stats(api,worker_pseudo,worker_id)
@@ -260,7 +270,7 @@ class LoadData:
         columns = ['text','lang']
         all_infl_tweets= pd.DataFrame(columns=columns)
         named_influencers, wokrer_bonus_infl = self.named_influencers()
-
+        named_influencers = named_influencers.drop_duplicates()
         for inlfuencer_id in range (0,named_influencers.shape[0]):
             influencer_pseudo=named_influencers.iloc[inlfuencer_id]
             if (influencer_pseudo != ''):
@@ -272,15 +282,13 @@ class LoadData:
                 infl_x=infl_x.append(pd.DataFrame([[influencer_pseudo,infl_acc_follower_nbr,infl_acc_followee_nbr,infl_acc_tweets_nbr,avg_length,\
                                                     language]],columns=['user_name','follower_nbr',\
                                                     'followee_nbr','tweets_nbr','avg_length_tweets','language']),ignore_index=True,sort=True)
-        print('bag of words')
         [bag_words_infl,vocab]= self.bag_words_tweets(all_infl_tweets)
         print('bag of words computed')
         sorted_vocab_infl=sorted(vocab.items(), key=operator.itemgetter(1),reverse=True)
         infl_x = pd.concat([infl_x, pd.DataFrame(bag_words_infl.toarray(),columns=[idx for idx, val in sorted_vocab_infl])], axis=1)
         worker_x=worker_x.drop(['language'], axis=1)
-        print(infl_x[['follower_nbr', 'followee_nbr']])
         infl_x = infl_x.drop_duplicates(subset=['user_name'])
-        infl_x=infl_x.drop(['language','user_name'], axis=1)
+        infl_x=infl_x.drop(['language'], axis=1)
         worker_x = worker_x.drop(['user_name'], axis=1)
         return worker_x,infl_x
         #print bag_txt,worker_id
